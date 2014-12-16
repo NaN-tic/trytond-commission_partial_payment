@@ -1,0 +1,11 @@
+# 
+msgid ""
+msgstr "Content-Type: text/plain; charset=utf-8\n"
+
+msgctxt "field:account.invoice,commissions:"
+msgid "Commissions"
+msgstr "Comisions"
+
+msgctxt "selection:commission.plan,commission_method:"
+msgid "On Partial Payment"
+msgstr "Al pagament parcial"
