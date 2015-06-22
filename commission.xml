@@ -9,5 +9,9 @@
             <field name="inherit" ref="account_invoice.invoice_view_form"/>
             <field name="name">account_invoice_form</field>
         </record>
+
+        <record model="ir.action.act_window" id="commission.act_commission_relate">
+            <field name="domain">[('from_invoice', 'in', Eval('active_ids'))]</field>
+        </record>
     </data>
 </tryton>

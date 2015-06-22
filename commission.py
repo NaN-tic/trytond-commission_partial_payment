@@ -1,6 +1,10 @@
 # The COPYRIGHT file at the top level of this repository contains the full
 # copyright notices and license terms.
 from decimal import Decimal
+from sql import Cast
+from sql.functions import Substring, Position
+from sql.conditionals import Coalesce
+
 from trytond.model import fields
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval
@@ -24,11 +28,58 @@ class Plan:
 class Commission:
     __name__ = 'commission'
 
+    from_invoice = fields.Function(fields.Many2One('account.invoice',
+            'From invoice'),
+        'get_from_invoice', searcher='search_from_invoice')
+
     @classmethod
     def _get_origin(cls):
         models = super(Commission, cls)._get_origin()
         models.append('account.move.line')
         return models
+
+    def get_from_invoice(self, name):
+        pool = Pool()
+        Invoice = pool.get('account.invoice')
+        InvoiceLine = pool.get('account.invoice.line')
+        MoveLine = pool.get('account.move.line')
+        if isinstance(self.origin, MoveLine):
+            move = self.origin.move
+            if isinstance(move.origin, Invoice):
+                return move.origin.id
+        if isinstance(self.origin, InvoiceLine):
+            return self.origin.invoice.id
+
+    @classmethod
+    def search_from_invoice(cls, name, clause):
+        pool = Pool()
+        Invoice = pool.get('account.invoice')
+        InvoiceLine = pool.get('account.invoice.line')
+        MoveLine = pool.get('account.move.line')
+        Move = pool.get('account.move')
+
+        table = cls.__table__()
+        invoice_line = InvoiceLine.__table__()
+        move_line = MoveLine.__table__()
+        move = Move.__table__()
+        move_invoice = Cast(Substring(move.origin,
+                Position(',', move.origin) + 1), Invoice.id.sql_type().base)
+        Operator = fields.SQL_OPERATORS[clause[1]]
+
+        query = table.join(invoice_line, type_='LEFT', condition=((Cast(
+                    Substring(table.origin, Position(',', table.origin) + 1),
+                InvoiceLine.id.sql_type().base) == invoice_line.id)
+                & table.origin.ilike('account.invoice.line,%'))).join(
+                    move_line, type_='LEFT', condition=((Cast(Substring(
+                                table.origin, Position(',', table.origin) + 1),
+                Move.id.sql_type().base) == move_line.id)
+                & table.origin.ilike('account.move.line,%'))).join(move,
+                    type_='LEFT', condition=(move.id == move_line.move)
+                    & move.origin.ilike('account.invoice,%')).select(
+                        table.id,
+                        where=Operator(Coalesce(invoice_line.id,
+                                move_invoice), clause[2]))
+        return [('id', 'in', query)]
 
 
 class Invoice:
