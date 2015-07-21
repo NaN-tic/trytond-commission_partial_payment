@@ -208,11 +208,11 @@ class Reconciliation:
         for sub_ids in grouped_slice(line_ids):
             to_delete += Commission.search([
                     ('invoice_line', '=', None),
-                    ('origin.invoice', 'in', sub_ids, 'account.move.line'),
+                    ('origin.id', 'in', sub_ids, 'account.move.line'),
                     ])
             to_cancel = Commission.search([
                     ('invoice_line', '!=', None),
-                    ('origin.invoice', 'in', sub_ids, 'account.move.line'),
+                    ('origin.id', 'in', sub_ids, 'account.move.line'),
                     ])
             for commission in Commission.copy(to_cancel):
                 commission.amount * -1
