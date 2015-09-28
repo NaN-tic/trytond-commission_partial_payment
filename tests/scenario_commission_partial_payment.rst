@@ -118,6 +118,9 @@ Create chart of accounts::
     >>> cash_journal.credit_account = cash
     >>> cash_journal.debit_account = cash
     >>> cash_journal.save()
+    >>> revenue_journal, = Journal.find([('type', '=', 'revenue')])
+    >>> revenue_journal.update_posted = True
+    >>> revenue_journal.save()
     >>> account_tax, = Account.find([
     ...         ('kind', '=', 'other'),
     ...         ('company', '=', company.id),
@@ -237,25 +240,7 @@ Create invoice::
     >>> line = invoice.lines.new()
     >>> line.product = product
     >>> line.quantity = 1
-    >>> invoice.save()
-
-Post invoice::
-
     >>> invoice.click('post')
-    >>> len(invoice.commissions)
-    2
-    >>> [c.date for c in invoice.commissions]
-    [None, None]
-    >>> [c.amount for c in invoice.commissions]
-    [Decimal('5.0000'), Decimal('5.0000')]
-    >>> [c.invoice_state for c in invoice.commissions]
-    ['', '']
-
-Pending amount for agent::
-
-    >>> agent.reload()
-    >>> agent.pending_amount
-    Decimal('10.0000')
 
 Pay the invoice partialy::
 
@@ -266,20 +251,72 @@ Pay the invoice partialy::
     >>> invoice.reload()
     >>> invoice.amount_to_pay
     Decimal('55.00')
-    >>> due_commission, _ = invoice.commissions
+    >>> due_commission, = invoice.commissions
+    >>> due_commission.amount
+    Decimal('5.0000')
     >>> due_commission.date == today
+    True
+
+Break the conciliation and check that the commission is deleted::
+
+    >>> MoveLine = Model.get('account.move.line')
+    >>> lines = MoveLine.find([('reconciliation', '!=', None)])
+    >>> unreconcile_lines = Wizard('account.move.unreconcile_lines', lines)
+    >>> invoice.reload()
+    >>> len(invoice.commissions)
+    0
+    >>> reconcile_lines = Wizard('account.move.reconcile_lines', lines)
+    >>> invoice.reload()
+    >>> invoice.amount_to_pay
+    Decimal('55.00')
+    >>> due_commission, = invoice.commissions
+    >>> due_commission.amount
+    Decimal('5.0000')
+    >>> due_commission.date == today
+    True
+
+Split the muturities in smaller pieces::
+
+    >>> invoice.move.click('draft')
+    >>> line, = [l for l in invoice.move.lines if not l.reconciliation and
+    ...     l.account == invoice.account]
+    >>> line.debit = Decimal('22.00')
+    >>> line.save()
+    >>> line = invoice.move.lines.new()
+    >>> line.debit = Decimal('33.00')
+    >>> line.account = invoice.account
+    >>> line.party = customer
+    >>> line.maturity_date = tomorrow
+    >>> invoice.move.click('post')
+
+Pay the next maturity::
+
+    >>> pay = Wizard('account.invoice.pay', [invoice])
+    >>> pay.form.journal = cash_journal
+    >>> pay.form.amount = Decimal('22.00')
+    >>> pay.form.date = tomorrow
+    >>> pay.execute('choice')
+    >>> invoice.reload()
+    >>> invoice.amount_to_pay
+    Decimal('33.00')
+    >>> _, due_commission = invoice.commissions
+    >>> due_commission.amount
+    Decimal('2.0000')
+    >>> due_commission.date == tomorrow
     True
 
 Pay the rest of the invoice::
 
     >>> pay = Wizard('account.invoice.pay', [invoice])
     >>> pay.form.journal = cash_journal
-    >>> pay.form.amount = Decimal('55.00')
+    >>> pay.form.amount = Decimal('33.00')
     >>> pay.form.date = tomorrow
     >>> pay.execute('choice')
     >>> invoice.reload()
     >>> invoice.amount_to_pay
     Decimal('0.0')
-    >>> _, due_commission = invoice.commissions
+    >>> _, _, due_commission = invoice.commissions
+    >>> due_commission.amount
+    Decimal('3.0000')
     >>> due_commission.date == tomorrow
     True
