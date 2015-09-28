@@ -154,7 +154,11 @@ class Reconciliation:
             plan = invoice.agent.plan
 
             merited_amount = invoice._get_partial_commission_amount(
-                paid_amount, plan).quantize(Decimal(str(10 ** -digits)))
+                paid_amount, plan)
+            if not merited_amount:
+                continue
+            merited_amount = merited_amount.quantize(
+                Decimal(str(10 ** -digits)))
             commission_amount = commission_amount.quantize(
                 Decimal(str(10 ** -digits)))
             amount = merited_amount - commission_amount
