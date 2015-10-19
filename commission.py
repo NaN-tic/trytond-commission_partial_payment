@@ -94,7 +94,7 @@ class Invoice:
     def get_commissions(self, name):
         pool = Pool()
         Commission = pool.get('commission')
-        ids = [l.id for l in self.lines_to_pay]
+        ids = [l.id for l in self.lines_to_pay + self.payment_lines]
         return [x.id for x in Commission.search([
                     ('origin.id', 'in', ids, 'account.move.line'),
                     ])]
@@ -110,8 +110,68 @@ class Invoice:
         # Only create commissions for non partial invoices
         return super(Invoice, cls).create_commissions(non_partial_invoices)
 
-    def _get_partial_commission_amount(self, amount, plan, pattern=None):
-        return plan.compute(amount, None, pattern=pattern)
+    def _get_partial_commission_amount(self, amount, pattern=None):
+        if not self.agent or not self.agent.plan:
+            return
+        return self.agent.plan.compute(amount, None, pattern=pattern)
+
+    def _get_partial_commission(self, amount, date):
+        'Returns the partial comission for the invoice for amount'
+        pool = Pool()
+        Commission = pool.get('commission')
+        commission = Commission()
+        commission.agent = self.agent
+        commission.product = self.agent.plan.commission_product
+        commission.amount = amount.quantize(Decimal(str(
+                    10 ** -Commission.amount.digits[1])))
+        commission.date = date
+        return commission
+
+    def compute_untaxed_amount(self, amount):
+        '''Apply a ratio to the paid amount in order to extract its untaxed
+        amount so we can correctly compute the commission amount'''
+        return amount * (self.untaxed_amount / self.total_amount)
+
+    @classmethod
+    def write(cls, *args):
+        actions = iter(args)
+        super(Invoice, cls).write(*args)
+        payment_invoices = []
+        for invoices, values in zip(actions, actions):
+            if set(values) & set(['payment_lines']):
+                payment_invoices.extend(invoices)
+        if payment_invoices:
+            cls.create_partial_commissions(payment_invoices)
+
+    @classmethod
+    def create_partial_commissions(cls, invoices):
+        pool = Pool()
+        Commission = pool.get('commission')
+        commissions = []
+        for invoice in invoices:
+            origins = set([str(x.origin) for x in invoice.commissions])
+            for line in invoice.payment_lines:
+                if line.reconciliation:
+                    continue
+                if str(line) not in origins:
+                    line_amount = line.credit - line.debit
+                    lines, remainder = invoice.get_reconcile_lines_for_amount(
+                        line_amount)
+                    # Don't create commission if line can be reconcicled
+                    if (any(l.debit - l.credit == line_amount for l in lines)
+                            or remainder == line_amount):
+                        continue
+                    amount = invoice._get_partial_commission_amount(
+                        line_amount)
+                    if not amount:
+                        continue
+                    amount = invoice.compute_untaxed_amount(amount)
+                    commission = invoice._get_partial_commission(amount,
+                        line.date)
+                    commission.origin = str(line)
+                    commissions.append(commission)
+        if commissions:
+            Commission.create([c._save_values for c in commissions])
 
 
 class Reconciliation:
@@ -133,6 +193,8 @@ class Reconciliation:
 
         commissions = []
         for invoice, line in invoices_move_lines:
+            if str(line) in (str(c.origin) for c in invoice.commissions):
+                continue
             if (not invoice.agent or not invoice.agent.plan or
                     invoice.agent.plan.commission_method != 'partial_payment'):
                 continue
@@ -149,12 +211,11 @@ class Reconciliation:
                 paid_amount *= -1
             # Apply a ratio to the paid amount in order to extract its
             # untaxed amount so we can correctly compute the commission amount
-            paid_amount *= invoice.untaxed_amount / invoice.total_amount
+            paid_amount = invoice.compute_untaxed_amount(paid_amount)
             digits = invoice.currency_digits
-            plan = invoice.agent.plan
 
             merited_amount = invoice._get_partial_commission_amount(
-                paid_amount, plan)
+                paid_amount)
             if not merited_amount:
                 continue
             merited_amount = merited_amount.quantize(
@@ -162,16 +223,11 @@ class Reconciliation:
             commission_amount = commission_amount.quantize(
                 Decimal(str(10 ** -digits)))
             amount = merited_amount - commission_amount
-            #print merited_amount, commission_amount, amount
             if amount:
-                commission = Commission()
+                date = max([l.date for l in line.reconciliation.lines])
+                commission = invoice._get_partial_commission(merited_amount,
+                    date)
                 commission.origin = str(line)
-                commission.agent = invoice.agent
-                commission.product = plan.commission_product
-                commission.amount = merited_amount.quantize(
-                    Decimal(str(10 ** -Commission.amount.digits[1])))
-                commission.date = max([l.date for l in
-                        line.reconciliation.lines])
                 commissions.append(commission)
         if commissions:
             Commission.create([x._save_values for x in commissions])

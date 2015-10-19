@@ -200,6 +200,11 @@ Create payment term::
     >>> line.type = 'remainder'
     >>> line.days = 10
     >>> payment_term.save()
+    >>> direct_term = PaymentTerm(name='Direct Term')
+    >>> line = direct_term.lines.new()
+    >>> line.type = 'remainder'
+    >>> line.days = 0
+    >>> direct_term.save()
 
 Create agent::
 
@@ -320,3 +325,67 @@ Pay the rest of the invoice::
     Decimal('3.0000')
     >>> due_commission.date == tomorrow
     True
+
+Create a invoice for with direct payment term::
+
+    >>> invoice = Invoice()
+    >>> invoice.party = customer
+    >>> invoice.payment_term = direct_term
+    >>> invoice.agent = agent
+    >>> line = invoice.lines.new()
+    >>> line.product = product
+    >>> line.quantity = 1
+    >>> invoice.click('post')
+
+Pay the invoice partialy::
+
+    >>> pay = Wizard('account.invoice.pay', [invoice])
+    >>> pay.form.journal = cash_journal
+    >>> pay.form.amount = Decimal('22.00')
+    >>> pay.execute('choice')
+    >>> pay.execute('pay')
+    >>> invoice.reload()
+    >>> invoice.amount_to_pay
+    Decimal('88.00')
+    >>> due_commission, = invoice.commissions
+    >>> due_commission.amount
+    Decimal('2.0000')
+    >>> due_commission.date == today
+    True
+
+Pay another amount partialy::
+
+    >>> pay = Wizard('account.invoice.pay', [invoice])
+    >>> pay.form.journal = cash_journal
+    >>> pay.form.amount = Decimal('11.00')
+    >>> pay.execute('choice')
+    >>> pay.execute('pay')
+    >>> invoice.reload()
+    >>> invoice.amount_to_pay
+    Decimal('77.00')
+    >>> _, due_commission, = invoice.commissions
+    >>> due_commission.amount
+    Decimal('1.0000')
+    >>> due_commission.date == today
+    True
+
+Pay the rest of the invoice::
+
+    >>> pay = Wizard('account.invoice.pay', [invoice])
+    >>> pay.form.journal = cash_journal
+    >>> pay.form.date = tomorrow
+    >>> pay.execute('choice')
+    >>> invoice.reload()
+    >>> invoice.amount_to_pay
+    Decimal('0.0')
+    >>> _, _, due_commission = invoice.commissions
+    >>> due_commission.amount
+    Decimal('7.0000')
+    >>> due_commission.date == tomorrow
+    True
+
+Asset all the commissions have been generated::
+
+    >>> agent.reload()
+    >>> agent.pending_amount
+    Decimal('20.0000')
