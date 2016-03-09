@@ -9,6 +9,7 @@ from trytond.model import fields
 from trytond.pool import Pool, PoolMeta
 from trytond.pyson import Eval
 from trytond.tools import grouped_slice
+from trytond.transaction import Transaction
 
 __all__ = ['Plan', 'Commission', 'Invoice', 'Reconciliation']
 __metaclass__ = PoolMeta
@@ -230,7 +231,8 @@ class Reconciliation:
                 commission.origin = str(line)
                 commissions.append(commission)
         if commissions:
-            Commission.create([x._save_values for x in commissions])
+            with Transaction().set_context(_check_access=False):
+                Commission.create([x._save_values for x in commissions])
         return reconciliations
 
     @classmethod
