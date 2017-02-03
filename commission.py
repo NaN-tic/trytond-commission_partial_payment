@@ -207,8 +207,6 @@ class Reconciliation:
             paid_amount = line.debit - line.credit
             for move_line in invoice.move.lines:
                 paid_amount += (move_line.debit - move_line.credit)
-            if invoice.type == 'out_credit_note':
-                paid_amount *= -1
             # Apply a ratio to the paid amount in order to extract its
             # untaxed amount so we can correctly compute the commission amount
             paid_amount = invoice.compute_untaxed_amount(paid_amount)
