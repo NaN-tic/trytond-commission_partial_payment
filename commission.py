@@ -130,6 +130,8 @@ class Invoice:
     def compute_untaxed_amount(self, amount):
         '''Apply a ratio to the paid amount in order to extract its untaxed
         amount so we can correctly compute the commission amount'''
+        if self.total_amount == 0:
+            return Decimal('0.0')
         return amount * (self.untaxed_amount / self.total_amount)
 
     @classmethod
