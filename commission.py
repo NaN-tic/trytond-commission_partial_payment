@@ -1,4 +1,4 @@
-# The COPYRIGHT file at the top level of this repository contains the full
+    # The COPYRIGHT file at the top level of this repository contains the full
 # copyright notices and license terms.
 from decimal import Decimal
 from sql import Cast
@@ -94,7 +94,7 @@ class Invoice:
     def get_commissions(self, name):
         pool = Pool()
         Commission = pool.get('commission')
-        ids = [l.id for l in self.lines_to_pay + self.payment_lines]
+        ids = [l.id for l in list(self.lines_to_pay) + list(self.payment_lines)]
         return [x.id for x in Commission.search([
                     ('origin.id', 'in', ids, 'account.move.line'),
                     ])]
