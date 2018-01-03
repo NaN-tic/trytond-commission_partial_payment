@@ -27,7 +27,6 @@ class Plan:
 
 class Commission:
     __name__ = 'commission'
-
     from_invoice = fields.Function(fields.Many2One('account.invoice',
             'From invoice'),
         'get_from_invoice', searcher='search_from_invoice')
@@ -35,6 +34,7 @@ class Commission:
     @classmethod
     def _get_origin(cls):
         models = super(Commission, cls)._get_origin()
+
         models.append('account.move.line')
         return models
 
@@ -43,6 +43,7 @@ class Commission:
         Invoice = pool.get('account.invoice')
         InvoiceLine = pool.get('account.invoice.line')
         MoveLine = pool.get('account.move.line')
+
         if isinstance(self.origin, MoveLine):
             move = self.origin.move
             if isinstance(move.origin, Invoice):
@@ -92,9 +93,9 @@ class Invoice:
         'get_commissions')
 
     def get_commissions(self, name):
-        pool = Pool()
-        Commission = pool.get('commission')
-        ids = [l.id for l in self.lines_to_pay + self.payment_lines]
+        Commission = Pool().get('commission')
+
+        ids = [l.id for l in list(self.lines_to_pay) + list(self.payment_lines)]
         return [x.id for x in Commission.search([
                     ('origin.id', 'in', ids, 'account.move.line'),
                     ])]
@@ -130,12 +131,15 @@ class Invoice:
     def compute_untaxed_amount(self, amount):
         '''Apply a ratio to the paid amount in order to extract its untaxed
         amount so we can correctly compute the commission amount'''
+        if not self.total_amount:
+            return Decimal('0')
         return amount * (self.untaxed_amount / self.total_amount)
 
     @classmethod
     def write(cls, *args):
         actions = iter(args)
         super(Invoice, cls).write(*args)
+
         payment_invoices = []
         for invoices, values in zip(actions, actions):
             if set(values) & set(['payment_lines']):
@@ -145,8 +149,8 @@ class Invoice:
 
     @classmethod
     def create_partial_commissions(cls, invoices):
-        pool = Pool()
-        Commission = pool.get('commission')
+        Commission = Pool().get('commission')
+
         commissions = []
         for invoice in invoices:
             origins = set([str(x.origin) for x in invoice.commissions])
@@ -193,17 +197,20 @@ class Reconciliation:
 
         commissions = []
         for invoice, line in invoices_move_lines:
-            if str(line) in (str(c.origin) for c in invoice.commissions):
-                continue
             if (not invoice.agent or not invoice.agent.plan or
                     invoice.agent.plan.commission_method != 'partial_payment'):
                 continue
 
-            commission_amount = Decimal(0)
+            _zero = Decimal(0)
+            commission_amount = _zero
             for commission in invoice.commissions:
-                if not commission.date:
-                    continue
                 commission_amount += commission.amount
+
+            if str(line) in (str(c.origin) for c in invoice.commissions):
+                # check commissions amount is 0, create new commission
+                if commission_amount != _zero:
+                    continue
+
             paid_amount = line.debit - line.credit
             for move_line in invoice.move.lines:
                 paid_amount += (move_line.debit - move_line.credit)
@@ -216,6 +223,7 @@ class Reconciliation:
                 paid_amount)
             if not merited_amount:
                 continue
+
             merited_amount = merited_amount.quantize(
                 Decimal(str(10 ** -digits)))
             commission_amount = commission_amount.quantize(
@@ -227,18 +235,17 @@ class Reconciliation:
                     date)
                 commission.origin = str(line)
                 commissions.append(commission)
+
         if commissions:
             Commission.create([x._save_values for x in commissions])
         return reconciliations
 
     @classmethod
     def delete(cls, reconciliations):
-        pool = Pool()
-        Commission = pool.get('commission')
+        Commission = Pool().get('commission')
 
         to_delete = []
         to_write = []
-
         line_ids = set()
         for reconciliation in reconciliations:
             line_ids |= {l.id for l in reconciliation.lines}
@@ -254,12 +261,13 @@ class Reconciliation:
                     ('origin.id', 'in', sub_ids, 'account.move.line'),
                     ])
             for commission in Commission.copy(to_cancel):
-                commission.amount * -1
                 to_write.extend(([commission], {
                             'amount': commission.amount * -1,
                             }))
 
-        Commission.delete(to_delete)
+        if to_delete:
+            Commission.delete(to_delete)
         if to_write:
             Commission.write(*to_write)
+
         super(Reconciliation, cls).delete(reconciliations)
