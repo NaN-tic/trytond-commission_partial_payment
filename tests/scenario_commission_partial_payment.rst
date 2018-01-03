@@ -291,3 +291,49 @@ Asset all the commissions have been generated::
     >>> agent.reload()
     >>> agent.pending_amount
     Decimal('20.0000')
+
+Create invoices from commissions::
+
+    >>> commission_amount = sum([commission.amount for commission in invoice.commissions])
+    >>> commission_amount == Decimal('10.0000')
+    True
+
+    >>> create_invoice = Wizard('commission.create_invoice')
+    >>> create_invoice.form.from_ = None
+    >>> create_invoice.form.to = None
+    >>> create_invoice.execute('create_')
+    >>> invoice.reload()
+    >>> com1, com2, com3 = invoice.commissions
+    >>> com1.invoice_state == 'invoiced'
+    True
+
+Delete a reconciliation::
+
+    >>> Reconciliation = Model.get('account.move.reconciliation')
+    >>> line1, line2, line3 = invoice.move.lines
+    >>> reconciliation = line1.reconciliation
+    >>> Reconciliation.delete([reconciliation])
+    >>> agent.reload()
+    >>> agent.pending_amount
+    Decimal('-10.0000')
+    >>> invoice.reload()
+    >>> len(invoice.commissions) == 6
+    True
+    >>> invoice.reconciled
+    False
+
+Pay the invoice that was delete reconciliation::
+
+    >>> pay = Wizard('account.invoice.pay', [invoice])
+    >>> pay.form.journal = cash_journal
+    >>> pay.form.amount = Decimal('110.00')
+    >>> pay.execute('choice')
+    >>> pay.execute('pay')
+    >>> invoice.reload()
+    >>> invoice.reconciled
+    True
+    >>> len(invoice.commissions) == 7
+    True
+    >>> commission_amount = sum([commission.amount for commission in invoice.commissions])
+    >>> commission_amount == Decimal('10.0000')
+    True
